@@ -41,7 +41,9 @@ typedef enum llawa_dtype {
     LLAWA_COUNT
 } llawa_dtype;
 
-extern size_t llawa_dtype_size[LLAWA_COUNT];
+//extern size_t llawa_dtype_size[LLAWA_COUNT];
+
+size_t llawa_sizeof_dtype(llawa_dtype dtype);
 
 typedef struct llawa_tensor {
     uint32_t n_dim;
@@ -63,7 +65,7 @@ typedef struct llawa_context {
     size_t end_offset;
 } llawa_context;
 
-llawa_context llawa_context_init(size_t mem_size);
+int llawa_context_init(llawa_context *ctx, size_t mem_size);
 
 llawa_tensor *llawa_new_tensor(
         llawa_context *ctx,
@@ -72,6 +74,10 @@ llawa_tensor *llawa_new_tensor(
         const uint32_t *ne,
         void *data
 );
+
+uint32_t llawa_tensor_bytes_size(llawa_tensor *tensor);
+
+uint32_t llawa_tensor_elem_size(llawa_tensor *tensor);
 
 #ifdef __cplusplus
 };

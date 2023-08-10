@@ -16,14 +16,15 @@ size_t llawa_dtype_size[LLAWA_COUNT] = {
         1, 2, 4, 2, 4
 };
 
-llawa_context llawa_context_init(size_t mem_size) {
-    llawa_context ctx = (llawa_context) {
+int llawa_context_init(llawa_context *ctx, size_t mem_size) {
+    *ctx = (llawa_context) {
             .mem_size = mem_size,
             .mem = NULL,
             .end_offset = 0
     };
-    ctx.mem = LLAWA_ALLOC_MEM(mem_size);
-    return ctx;
+    ctx->mem = LLAWA_ALLOC_MEM(mem_size);
+    if (ctx->mem == NULL) return 0;
+    return 1;
 }
 
 /**
@@ -77,4 +78,19 @@ llawa_tensor *llawa_new_tensor(
 
     ctx->end_offset += total_sz;
     return new_tensor;
+}
+
+uint32_t llawa_tensor_bytes_size(llawa_tensor *tensor) {
+    uint32_t dtype_size = llawa_dtype_size[tensor->dtype];
+    return dtype_size * llawa_tensor_elem_size(tensor);
+}
+
+uint32_t llawa_tensor_elem_size(llawa_tensor *tensor) {
+    uint32_t sz = 1;
+    for (int i = 0; i < tensor->n_dim; i++) sz *= tensor->ne[i];
+    return sz;
+}
+
+size_t llawa_sizeof_dtype(llawa_dtype dtype) {
+    return llawa_dtype_size[dtype];
 }
