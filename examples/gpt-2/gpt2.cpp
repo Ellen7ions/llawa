@@ -69,7 +69,7 @@ bool gpt2_context_init(gpt2 &model) {
 
         ctx_size += (6 + 12 * n_layer) * 512; // object overhead
 
-        printf("%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size / (1024.0 * 1024.0));
+        printf("%s: llawa ctx size = %6.2f MB\n", __func__, ctx_size / (1024.0 * 1024.0));
     }
     return llawa_context_init(&model.context, ctx_size);
 }
@@ -142,9 +142,10 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
     }
 
     // load tensor
-    while (!fs.eof()) {
+    while (true) {
         uint32_t n_dims, length, dtype;
         fs.read((char *) (&n_dims), sizeof(uint32_t));
+        if (fs.eof()) break;
         fs.read((char *) (&length), sizeof(uint32_t));
         fs.read((char *) (&dtype), sizeof(uint32_t));
         uint32_t ne[LLAWA_MAX_DIM];
@@ -156,17 +157,18 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
 
 #ifdef LLAWA_DEBUG
         std::cerr << "load tensor: " << name << " -> [";
-        for (int i = 0; i < n_dims; i++)
+        for (int i = 0; i < n_dims; i++) {
             std::cerr << ne[i] << ", ";
+        }
         std::cerr << "]" << std::endl;
 #endif
-
         auto tensor = llawa_new_tensor(&model.context, static_cast<llawa_dtype>(dtype), n_dims, ne, NULL);
         model.tensors[name] = tensor;
         uint32_t bytes_sz = llawa_tensor_bytes_size(tensor);
         fs.read((char *) (tensor->data), bytes_sz);
     }
 
+    fs.close();
     return true;
 }
 
