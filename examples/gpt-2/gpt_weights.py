@@ -6,6 +6,28 @@ import argparse
 import pickle
 
 
+def bytes_to_unicode():
+    """
+    Returns list of utf-8 byte and a corresponding list of unicode strings.
+    The reversible bpe codes work on unicode strings.
+    This means you need a large # of unicode characters in your vocab if you want to avoid UNKs.
+    When you're at something like a 10B token dataset you end up needing around 5K for decent coverage.
+    This is a signficant percentage of your normal, say, 32K bpe vocab.
+    To avoid that, we want lookup tables between utf-8 bytes and unicode strings.
+    And avoids mapping to whitespace/control characters the bpe code barfs on.
+    """
+    bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("¡"), ord("¬") + 1)) + list(range(ord("®"), ord("ÿ") + 1))
+    cs = bs[:]
+    n = 0
+    for b in range(2 ** 8):
+        if b not in bs:
+            bs.append(b)
+            cs.append(2 ** 8 + n)
+            n += 1
+    cs = [chr(n) for n in cs]
+    return dict(zip(bs, cs))
+
+
 class Base:
     def __init__(self, *args, **kwargs):
         for k, v in kwargs.items():
@@ -41,7 +63,7 @@ class LlawaTensor(Base):
 
 class LlawaVocab(Base):
     length: int
-    word: str
+    word: List[Any]
 
 
 class LlawaFile(Base):
@@ -66,8 +88,16 @@ def load_llawa_file(
         ftype=FType.LLAWA_F32.value,
     )
 
-    vocab = sorted(vocab.items(), key=lambda x: x[1])
-    vocab = [LlawaVocab(length=len(v), word=v) for v, _id in vocab]
+    # vocab = sorted(vocab.items(), key=lambda x: x[1])
+
+    byte_decoder = bytes_to_unicode()
+    byte_decoder = {v: k for k, v in byte_decoder.items()}
+
+    vocab_res = []
+    for k in vocab:
+        text = [byte_decoder[c] for c in k]
+        vocab_res.append(LlawaVocab(length=len(bytearray(text)), word=text))
+
     tensors = [LlawaTensor(
         n_dims=len(v.shape),
         length=len(k),
@@ -80,7 +110,7 @@ def load_llawa_file(
         magic='awall'[::-1],
         hparams=hparams,
         n_vocab=hparams.n_vocab,
-        vocab=vocab,
+        vocab=vocab_res,
         tensors=tensors
     )
 
@@ -98,7 +128,7 @@ if __name__ == '__main__':
     with open(f"{base_path}/config.json", 'r') as f:
         config = json.load(f)
 
-    with open(f"{base_path}/vocab.json", 'r') as f:
+    with open(f"{base_path}/vocab.json", 'r', encoding='utf-8') as f:
         vocab = json.load(f)
 
     llawa_file = load_llawa_file(
@@ -112,17 +142,20 @@ if __name__ == '__main__':
         f.write(llawa_file.magic.encode())
 
         print('writing hparams...')
-        for k in dir(llawa_file.hparams):
-            if not k.startswith('__'):
-                f.write(getattr(llawa_file.hparams, k).to_bytes(length=4, byteorder='little', signed=False))
+        f.write(llawa_file.hparams.n_vocab.to_bytes(length=4, byteorder='little', signed=False))
+        f.write(llawa_file.hparams.n_ctx.to_bytes(length=4, byteorder='little', signed=False))
+        f.write(llawa_file.hparams.n_embd.to_bytes(length=4, byteorder='little', signed=False))
+        f.write(llawa_file.hparams.n_head.to_bytes(length=4, byteorder='little', signed=False))
+        f.write(llawa_file.hparams.n_layer.to_bytes(length=4, byteorder='little', signed=False))
+        f.write(llawa_file.hparams.ftype.to_bytes(length=4, byteorder='little', signed=False))
 
         print('writing n_vocab...')
         f.write(llawa_file.n_vocab.to_bytes(length=4, byteorder='little', signed=False))
 
         print('writing vocabs...')
-        for vb in llawa_file.vocab:
+        for i, vb in enumerate(llawa_file.vocab):
             f.write(vb.length.to_bytes(length=4, byteorder='little', signed=False))
-            f.write(vb.word.encode())
+            f.write(bytearray(vb.word))
 
         print('writing tensors...')
         for ts in llawa_file.tensors:
