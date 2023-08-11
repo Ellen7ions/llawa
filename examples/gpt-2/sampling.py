@@ -32,8 +32,13 @@ def top_k_logits(logits, k):
     return torch.where(logits < min_values, torch.ones_like(logits, dtype=logits.dtype) * -1e10, logits)
 
 
-def sample(model, token_ids, temperature, top_k):
-    logits = model(token_ids, pos_ids=[k for k in range(len(token_ids))])
+def sample(model, token_ids, n_past=0, past_cache=None, temperature=0.9, top_k=50):
+    logits, kv_cache = model(
+        token_ids,
+        pos_ids=[n_past + k for k in range(len(token_ids))],
+        past_cache=past_cache,
+        n_past=n_past
+    )
     logits = logits[-1, :] / temperature
     logits = top_k_logits(logits, k=top_k)
     log_probs = F.softmax(logits, dim=-1)
@@ -41,7 +46,7 @@ def sample(model, token_ids, temperature, top_k):
         prev = torch.multinomial(log_probs, num_samples=1)
     else:
         _, prev = torch.topk(log_probs, k=1, dim=-1)
-    return prev
+    return prev, kv_cache
 
 
 class Decoder:

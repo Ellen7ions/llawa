@@ -56,16 +56,25 @@ class Attention(nn.Module):
         new_x_shape = x.size()[:-2] + (x.size(-2) * x.size(-1),)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
-    def forward(self, tokens):
+    def forward(self, tokens, past_cache=None):
         qkv = tokens @ self.attn_c_attn_weight + self.attn_c_attn_bias
         q, k, v = qkv.split(tokens.shape[1], dim=1)
+
+        if past_cache is None:
+            kv_cache = (k, v)
+        else:
+            k_cache, v_cache = past_cache[0], past_cache[1]
+            k = torch.cat([k_cache, k], -2)
+            v = torch.cat([v_cache, v], -2)
+            kv_cache = (k, v)
+
         q = self._split_heads(q)
         k = self._split_heads(k, True)
         v = self._split_heads(v)
         a = self._attention(q, k, v)
         a = self._merge_heads(a)
         a = a @ self.attn_c_proj_weight + self.attn_c_proj_bias
-        return a
+        return a, kv_cache
 
 
 class MLP(nn.Module):
@@ -93,12 +102,12 @@ class Block(nn.Module):
         self.ln_2_bias = pth[f'h.{sub_i}.ln_2.bias']
         self.mlp = MLP(pth, sub_i)
 
-    def forward(self, x):
-        x_attn = self.attn(layer_norm(x, self.ln_1_weight, self.ln_1_bias))
+    def forward(self, x, past_cache=None):
+        x_attn, kv_cache = self.attn(layer_norm(x, self.ln_1_weight, self.ln_1_bias), past_cache)
         x = x + x_attn
         x_mlp = self.mlp(layer_norm(x, self.ln_2_weight, self.ln_2_bias))
         x = x + x_mlp
-        return x
+        return x, kv_cache
 
 
 class TinyGPT2(nn.Module):
@@ -112,16 +121,22 @@ class TinyGPT2(nn.Module):
         self.ln_f_weight = pth['ln_f.weight']
         self.ln_f_bias = pth['ln_f.bias']
 
-    def forward(self, tokens_ids, pos_ids, n_past=0):
+    def forward(self, tokens_ids, pos_ids, n_past=0, past_cache=None):
         tokens_embed = self.wte[tokens_ids]
         position_embed = self.wpe[pos_ids]
 
         tokens = tokens_embed + position_embed
+
+        if past_cache is None:
+            past_cache = [None] * 12
+
+        present_cache = []
         for i in range(12):
-            tokens = self.layers[i](tokens)
+            tokens, kv_cache = self.layers[i](tokens, past_cache[i])
+            present_cache.append(kv_cache)
         tokens = layer_norm(tokens, self.ln_f_weight, self.ln_f_bias)
         logits = tokens @ self.wte.permute(1, 0)
-        return logits
+        return logits, present_cache
 
 
 def openai_pipeline(text, max_token):
@@ -148,17 +163,23 @@ def tinygpt2_pipeline(text, max_token):
     with open(base_path + '/vocab.json', 'r') as fp:
         decoder = json.load(fp)
     dec = Decoder(decoder)
-    output = None
+    kv_cache = None
+    n_past = 0
+    print(text)
     for i in range(max_token):
-        token = sample(
+        token, kv_cache = sample(
             model=tiny_gpt,
+            past_cache=kv_cache,
+            n_past=n_past,
             token_ids=token_ids,
             temperature=0.8,
             top_k=10
         )
-        token_ids.append(token.numpy().item())
+        # token_ids.append(token.numpy().item())
+        token_ids = [token.numpy().item()]
         output = dec.decode(token_ids)
-    print(output)
+        n_past += 1
+        print(output, end='')
 
 
 if __name__ == '__main__':
@@ -170,4 +191,4 @@ if __name__ == '__main__':
     text = "Replace me by any text you'd like."
 
     tinygpt2_pipeline(text, max_token=200)
-    openai_pipeline(text, max_token=200)
+    # openai_pipeline(text, max_token=200)
