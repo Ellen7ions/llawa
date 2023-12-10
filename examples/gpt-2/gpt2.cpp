@@ -7,6 +7,7 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <regex>
 
 #include "llawa.h"
 
@@ -148,7 +149,7 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
         if (fs.eof()) break;
         fs.read((char *) (&length), sizeof(uint32_t));
         fs.read((char *) (&dtype), sizeof(uint32_t));
-        uint32_t ne[LLAWA_MAX_DIM];
+        uint32_t ne[LLAWA_MAX_DIM] = {1, 1, 1, 1};
         for (int i = 0; i < n_dims; i++) fs.read((char *) (ne + i), sizeof(uint32_t));
 
         char buf[128];
@@ -172,8 +173,172 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
     return true;
 }
 
-void gpt2_eval(gpt2 &model) {
+llawa_tensor *gpt2_layer_norm(gpt2 &model, llawa_tensor *inp, llawa_tensor *w, llawa_tensor *bias) {
+    llawa_tensor *res = llawa_zeros_like(&model.context, inp);
 
+    llawa_tensor *mean_dst = llawa_new_tensor4d(&model.context, inp->dtype,
+                                                inp->ne[0], 1, inp->ne[2], inp->ne[3],
+                                                nullptr);
+    llawa_tensor *std_dst = llawa_new_tensor4d(&model.context, inp->dtype,
+                                               inp->ne[0], 1, inp->ne[2], inp->ne[3],
+                                               nullptr);
+
+    llawa_mean(&model.context, inp, 1, mean_dst);
+
+    llawa_tensor *sub_dst = llawa_zeros_like(&model.context, inp);
+    llawa_sub(&model.context, inp, mean_dst, sub_dst);
+    llawa_std(&model.context, inp, mean_dst, 1, std_dst);
+
+    float val = 1e-8;
+    llawa_add(&model.context, std_dst, llawa_scalar(&model.context, LLAWA_F32, &val), std_dst);
+
+    llawa_div(&model.context, sub_dst, std_dst, res);
+    llawa_new_axis(&model.context, w, 0, w);
+    llawa_new_axis(&model.context, bias, 0, bias);
+    llawa_mul_dot(&model.context, res, w, res);
+    llawa_add(&model.context, res, bias, res);
+    return res;
+}
+
+llawa_tensor *gpt2_attention(
+        gpt2 &model,
+        llawa_tensor *inp,
+        llawa_tensor *bias,
+        llawa_tensor *attn_w,
+        llawa_tensor *attn_bias,
+        llawa_tensor *proj_w,
+        llawa_tensor *proj_bias
+) {
+    llawa_tensor *res = llawa_zeros_like(&model.context, inp);
+    llawa_tensor *qkv = llawa_new_tensor2d(&model.context, LLAWA_F32,
+                                           inp->ne[0], attn_w->ne[1], nullptr);
+    llawa_mat_mul(&model.context, inp, attn_w, qkv);
+    llawa_new_axis(&model.context, attn_bias, 0, attn_bias);
+    llawa_add(&model.context, qkv, attn_bias, qkv);
+
+    
+    return res;
+}
+
+llawa_tensor *gpt2_layer_forward(gpt2 &model, llawa_tensor *inp, int c_layer) {
+    // atten
+    {
+        llawa_tensor *norm = gpt2_layer_norm(
+                model, inp,
+                model.tensors["h." + std::to_string(c_layer) + ".ln_1.weight"],
+                model.tensors["h." + std::to_string(c_layer) + ".ln_1.bias"]
+        );
+        llawa_add(&model.context, inp, norm, inp);
+
+        llawa_tensor *x_attn = gpt2_attention(
+                model,
+                inp,
+                model.tensors["h." + std::to_string(c_layer) + ".attn.bias"],
+                model.tensors["h." + std::to_string(c_layer) + ".attn.c_attn.weight"],
+                model.tensors["h." + std::to_string(c_layer) + ".attn.c_attn.bias"],
+                model.tensors["h." + std::to_string(c_layer) + ".attn.c_proj.weight"],
+                model.tensors["h." + std::to_string(c_layer) + ".attn.c_proj.bias"]
+        );
+
+//        norm = gpt2_layer_norm(model, inp);
+    }
+
+    // mlp
+    {
+
+    }
+}
+
+int gpt2_forward(
+        gpt2 &model,
+        const std::vector<int> &token_ids,
+        const std::vector<int> &pos_ids,
+        int n_past,
+        std::vector<int> *past_cache,
+        std::vector<int> *ret_logits,
+        std::vector<int> *ret_present_cache
+) {
+    auto wte = model.tensors["wte.weight"];
+    auto wpe = model.tensors["wpe.weight"];
+    auto token_ids_tensor = llawa_new_tensor1d(&model.context, LLAWA_I32, token_ids.size(), nullptr);
+    auto pos_ids_tensor = llawa_new_tensor1d(&model.context, LLAWA_I32, pos_ids.size(), nullptr);
+    for (auto i = 0; i < token_ids.size(); i++)
+        llawa_tensor_set_val_i32(&model.context, token_ids_tensor, i, 0, 0, 0, token_ids[i]);
+
+    for (auto i = 0; i < pos_ids.size(); i++)
+        llawa_tensor_set_val_i32(&model.context, pos_ids_tensor, i, 0, 0, 0, pos_ids[i]);
+
+    auto tokens_embd = llawa_get_rows(&model.context, wte, token_ids_tensor);
+    auto pos_embd = llawa_get_rows(&model.context, wpe, pos_ids_tensor);
+
+    auto inp_embd = llawa_zeros_like(&model.context, tokens_embd);
+    llawa_add(&model.context, tokens_embd, pos_embd, inp_embd);
+
+
+    // ?
+//    if (past_cache == nullptr) {
+//        past_cache = new std::vector<int>(12, -1);
+//    }
+//
+//    auto *present_cache = new std::vector<int>();
+//
+    auto cur = inp_embd;
+    for (int c_layer = 0; c_layer < model.hparams.n_layer; c_layer++) {
+//        auto *kv_cache = llawa_new_tensor(&model.context, LLAWA_F32,);
+        cur = gpt2_layer_forward(model, cur, c_layer);
+//        break;
+//        present_cache->push_back(kv_cache);
+    }
+//
+//    tokens = gpt2_layer_norm(cur, model.tensors["ln_f.weights"], model.tensors["ln_f.bias"]);
+//    ret_logits = llawa_mat_mul(tokens, llawa_transpose(wte));
+//    ret_present_cache = present_cache;
+    return 0;
+}
+
+void gpt_split_words(std::string str, std::vector<std::string> &words) {
+    const std::string pattern = R"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
+    const std::regex re(pattern);
+    std::smatch m;
+
+    while (std::regex_search(str, m, re)) {
+        for (auto x: m) {
+            words.push_back(x);
+        }
+        str = m.suffix();
+    }
+}
+
+std::vector<int> gpt_tokenize(const gpt2 &context, const std::string &text) {
+    std::vector<std::string> words;
+
+    // first split the text into words
+    {
+        std::string str = text;
+
+        gpt_split_words(str, words);
+    }
+
+    // find the longest token that forms each word in words:
+    std::vector<int> tokens;
+    for (const auto &word: words) {
+        for (int i = 0; i < (int) word.size();) {
+            for (int j = word.size() - 1; j >= i; j--) {
+                auto cand = word.substr(i, j - i + 1);
+                auto it = context.token_to_id.find(cand);
+                if (it != context.token_to_id.end()) { // word.substr(i, j-i+1) in vocab
+                    tokens.push_back(it->second);
+                    i = j + 1;
+                    break;
+                } else if (j == i) { // word.substr(i, 1) has no matching
+                    fprintf(stderr, "%s: unknown token '%s'\n", __func__, word.substr(i, 1).data());
+                    i++;
+                }
+            }
+        }
+    }
+
+    return tokens;
 }
 
 int main(int argc, char *argv[]) {
@@ -183,6 +348,18 @@ int main(int argc, char *argv[]) {
 
     gpt2_load(model, model_path);
 
-    gpt2_eval(model);
+//    gpt2_eval(model);
+
+    auto res = gpt_tokenize(model, "hello world! what's your name ?");
+    auto pos = std::vector<int>();
+    for (auto i = 0; i < res.size(); i++) pos.push_back(i);
+
+    std::vector<int> *ret_logits = new std::vector<int>;
+    std::vector<int> *ret_present_cache = new std::vector<int>;
+    gpt2_forward(model, res, pos, 0,
+                 nullptr,
+                 ret_logits,
+                 ret_present_cache);
+
     return 0;
 }
