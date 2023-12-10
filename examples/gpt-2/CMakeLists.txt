@@ -6,5 +6,11 @@ message("Executable files will at ${CMAKE_BINARY_DIR}")
 include_directories(${LLAWA_INCLUDE})
 message(${LLAWA_INCLUDE})
 
+find_package(OpenMP REQUIRED)
 add_executable(gpt2 gpt2.cpp)
-target_link_libraries(gpt2 llawa)
+
+target_link_libraries(gpt2 PRIVATE llawa)
+target_link_libraries(gpt2
+        PRIVATE
+        OpenMP::OpenMP_CXX
+)
