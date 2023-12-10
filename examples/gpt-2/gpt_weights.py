@@ -116,7 +116,7 @@ def load_llawa_file(
 
 
 if __name__ == '__main__':
-    base_path = '../pretrained/models--gpt2/snapshots/11c5a3d5811f50298f278a704980280950aedb10/'
+    base_path = '../../pretrained/gpt2'
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=base_path, type=str, help="load model path")

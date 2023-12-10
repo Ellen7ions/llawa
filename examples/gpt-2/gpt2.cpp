@@ -172,7 +172,7 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
     return true;
 }
 
-void gpt2_eval() {
+void gpt2_eval(gpt2 &model) {
 
 }
 
@@ -182,5 +182,7 @@ int main(int argc, char *argv[]) {
     gpt2 model;
 
     gpt2_load(model, model_path);
+
+    gpt2_eval(model);
     return 0;
 }

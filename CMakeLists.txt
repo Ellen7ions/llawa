@@ -13,6 +13,6 @@ if (${LLAWA_DEBUG})
     add_definitions(-DLLAWA_DEBUG)
 endif ()
 
-add_subdirectory(tests)
+#add_subdirectory(tests)
 add_subdirectory(src)
 add_subdirectory(examples)

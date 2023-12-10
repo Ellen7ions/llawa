@@ -183,9 +183,9 @@ def tinygpt2_pipeline(text, max_token):
 
 
 if __name__ == '__main__':
-    base_path = '../pretrained/models--gpt2/snapshots/11c5a3d5811f50298f278a704980280950aedb10/'
+    base_path = '../../pretrained/gpt2'
 
-    tokenizer = AutoTokenizer.from_pretrained('gpt2', cache_dir='../pretrained')
+    tokenizer = AutoTokenizer.from_pretrained('/home/lzz/CLionProjects/llawa/pretrained/gpt2')
     pth = torch.load(f"{base_path}/pytorch_model.bin")
 
     text = "Replace me by any text you'd like."
