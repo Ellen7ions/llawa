@@ -54,6 +54,8 @@ typedef struct llawa_tensor {
     uint32_t n_dim;
     uint32_t ne[LLAWA_MAX_DIM];
 
+    uint32_t stride[LLAWA_MAX_DIM];
+
 //    llawa_op op_type;
     llawa_dtype dtype;
     struct llawa_tensor *src[LLAWA_MAX_OP_SRC];
@@ -77,6 +79,7 @@ llawa_tensor *llawa_new_tensor(
         llawa_dtype dtype,
         uint32_t n_dim,
         const uint32_t *ne,
+        const uint32_t *stride,
         void *data
 );
 

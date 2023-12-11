@@ -54,6 +54,7 @@ llawa_tensor *llawa_new_tensor(
         llawa_dtype dtype,
         uint32_t n_dim,
         const uint32_t *ne,
+        const uint32_t *stride,
         void *data
 ) {
     void *ctx_mem_end = ctx->mem + ctx->end_offset;
@@ -79,6 +80,7 @@ llawa_tensor *llawa_new_tensor(
             .data = data == NULL ? new_data : data,
             .n_dim = n_dim,
             .ne = {0},
+            .stride = {0},
 //            .op_type = LLAWA_OP_NONE,
             .dtype = dtype,
             .src = {NULL},
@@ -86,6 +88,7 @@ llawa_tensor *llawa_new_tensor(
 
     for (int i = 0; i < LLAWA_MAX_DIM; i++) {
         new_tensor->ne[i] = ne[i];
+        new_tensor->stride[i] = stride[i];
     }
 
     ctx->end_offset += total_sz;
@@ -99,12 +102,14 @@ llawa_tensor *llawa_new_tensor2d(
         uint32_t d1,
         void *data
 ) {
-    uint32_t *ne = malloc(sizeof(uint32_t) * 4);
-    memset(ne, 0, sizeof(uint32_t) * 4);
+    uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    uint32_t *stride = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(ne, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(stride, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
     for (int i = 0; i < LLAWA_MAX_DIM; i++) *(ne + i) = 1;
     *ne = d0;
     *(ne + 1) = d1;
-    return llawa_new_tensor(ctx, dtype, 2, ne, data);
+    return llawa_new_tensor(ctx, dtype, 2, ne, stride, data);
 }
 
 llawa_tensor *llawa_new_tensor1d(
@@ -113,11 +118,13 @@ llawa_tensor *llawa_new_tensor1d(
         uint32_t d0,
         void *data
 ) {
-    uint32_t *ne = malloc(sizeof(uint32_t) * 4);
-    memset(ne, 0, sizeof(uint32_t) * 4);
+    uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    uint32_t *stride = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(ne, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(stride, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
     for (int i = 0; i < LLAWA_MAX_DIM; i++) *(ne + i) = 1;
     *ne = d0;
-    return llawa_new_tensor(ctx, dtype, 1, ne, data);
+    return llawa_new_tensor(ctx, dtype, 1, ne, stride, data);
 }
 
 llawa_tensor *llawa_new_tensor4d(
@@ -131,11 +138,13 @@ llawa_tensor *llawa_new_tensor4d(
 ) {
 
     uint32_t *ne = (uint32_t *) malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    uint32_t *stride = (uint32_t *) malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(stride, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
     *(ne + 0) = d0;
     *(ne + 1) = d1;
     *(ne + 2) = d2;
     *(ne + 3) = d3;
-    return llawa_new_tensor(ctx, dtype, 4, ne, data);
+    return llawa_new_tensor(ctx, dtype, 4, ne, stride, data);
 }
 
 
@@ -143,7 +152,7 @@ llawa_tensor *llawa_zeros_like(
         llawa_context *ctx,
         llawa_tensor *tensor
 ) {
-    llawa_tensor *res = llawa_new_tensor(ctx, tensor->dtype, tensor->n_dim, tensor->ne, NULL);
+    llawa_tensor *res = llawa_new_tensor(ctx, tensor->dtype, tensor->n_dim, tensor->ne, tensor->stride, NULL);
     return res;
 }
 
@@ -165,19 +174,20 @@ void llawa_tensor_set_val_f32(
 ) {
     assert(src0->dtype == LLAWA_F32);
     *(float *) (src0->data +
-                d0 * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                d1 * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
-                d2 * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                d3 * llawa_sizeof_dtype(src0->dtype)) = val;
+                (d0 + src0->stride[0]) * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
+                (d1 + src0->stride[1]) * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
+                (d2 + src0->stride[2]) * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
+                (d3 + src0->stride[3]) * llawa_sizeof_dtype(src0->dtype)) = val;
 }
 
 float
 llawa_tensor_get_val_f32(llawa_context *ctx, llawa_tensor *src0, uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3) {
-    return *(float *) (src0->data +
-                       d0 * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                       d1 * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
-                       d2 * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                       d3 * llawa_sizeof_dtype(src0->dtype));
+    return *(float *)
+            (src0->data +
+             (d0 + src0->stride[0]) * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
+             (d1 + src0->stride[1]) * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
+             (d2 + src0->stride[2]) * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
+             (d3 + src0->stride[3]) * llawa_sizeof_dtype(src0->dtype));
 }
 
 void llawa_tensor_set_val_i32(
@@ -187,10 +197,10 @@ void llawa_tensor_set_val_i32(
 ) {
     assert(src0->dtype == LLAWA_I32);
     *(int32_t *) (src0->data +
-                  d0 * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                  d1 * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
-                  d2 * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                  d3 * llawa_sizeof_dtype(src0->dtype)) = val;
+                  (d0 + src0->stride[0]) * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
+                  (d1 + src0->stride[1]) * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
+                  (d2 + src0->stride[2]) * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
+                  (d3 + src0->stride[3]) * llawa_sizeof_dtype(src0->dtype)) = val;
 }
 
 size_t llawa_sizeof_dtype(llawa_dtype dtype) {
@@ -205,7 +215,7 @@ llawa_tensor *llawa_get_rows(llawa_context *ctx, llawa_tensor *src, llawa_tensor
     for (int i = 0; i < ids->ne[0]; i++) {
         for (int j = 0; j < src->ne[1]; j++) {
             // data[ids[i]][j][1][1] = src[ids[i]][j][1][1]
-
+            // no strides ?
             uint32_t sub = *(int32_t *) (ids->data + i * llawa_sizeof_dtype(ids->dtype));
             float v = *(float *) (src->data + sub * (src->ne[1] * llawa_sizeof_dtype(src->dtype)) +
                                   j * llawa_sizeof_dtype(src->dtype));
