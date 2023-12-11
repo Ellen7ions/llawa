@@ -13,6 +13,15 @@
 #define LLAWA_ALLOC_MEM malloc
 #define LLAWA_FREE_MEME free
 
+#define LLAWA_INIT_STRIDE(x, ne)               \
+{                                       \
+*(x + 0) = ne[1] * ne[2] * ne[3];  \
+*(x + 1) = ne[2] * ne[3];          \
+*(x + 2) = ne[3];                  \
+*(x + 3) = 1;                      \
+}
+
+
 // DEBUG
 
 
@@ -149,6 +158,13 @@ llawa_tensor *llawa_scalar(llawa_context *ctx, llawa_dtype dtype, void *val);
 int llawa_new_axis(llawa_context *ctx, llawa_tensor *src, int t0, llawa_tensor *dst);
 
 int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, llawa_tensor *dst);
+
+llawa_tensor **llawa_split(llawa_context *ctx, llawa_tensor *src, uint32_t sz, uint32_t dim, uint32_t *n);
+
+llawa_tensor *
+llawa_view(llawa_context *ctx, llawa_tensor *src, uint32_t new_n_dim, const uint32_t new_ne[LLAWA_MAX_DIM]);
+
+llawa_tensor *llawa_permute(llawa_context *ctx, llawa_tensor *src, const uint32_t pm_ne[LLAWA_MAX_DIM]);
 
 #ifdef __cplusplus
 };

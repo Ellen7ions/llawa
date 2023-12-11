@@ -109,6 +109,8 @@ llawa_tensor *llawa_new_tensor2d(
     for (int i = 0; i < LLAWA_MAX_DIM; i++) *(ne + i) = 1;
     *ne = d0;
     *(ne + 1) = d1;
+
+    LLAWA_INIT_STRIDE(stride, ne);
     return llawa_new_tensor(ctx, dtype, 2, ne, stride, data);
 }
 
@@ -124,6 +126,8 @@ llawa_tensor *llawa_new_tensor1d(
     memset(stride, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
     for (int i = 0; i < LLAWA_MAX_DIM; i++) *(ne + i) = 1;
     *ne = d0;
+
+    LLAWA_INIT_STRIDE(stride, ne);
     return llawa_new_tensor(ctx, dtype, 1, ne, stride, data);
 }
 
@@ -144,6 +148,7 @@ llawa_tensor *llawa_new_tensor4d(
     *(ne + 1) = d1;
     *(ne + 2) = d2;
     *(ne + 3) = d3;
+    LLAWA_INIT_STRIDE(stride, ne);
     return llawa_new_tensor(ctx, dtype, 4, ne, stride, data);
 }
 
@@ -173,21 +178,22 @@ void llawa_tensor_set_val_f32(
         float val
 ) {
     assert(src0->dtype == LLAWA_F32);
-    *(float *) (src0->data +
-                (d0 + src0->stride[0]) * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                (d1 + src0->stride[1]) * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
-                (d2 + src0->stride[2]) * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                (d3 + src0->stride[3]) * llawa_sizeof_dtype(src0->dtype)) = val;
+    *(float *)
+            (src0->data +
+             d0 * (src0->stride[0] * llawa_sizeof_dtype(src0->dtype)) +
+             d1 * (src0->stride[1] * llawa_sizeof_dtype(src0->dtype)) +
+             d2 * (src0->stride[2] * llawa_sizeof_dtype(src0->dtype)) +
+             d3 * (src0->stride[3] * llawa_sizeof_dtype(src0->dtype))) = val;
 }
 
 float
 llawa_tensor_get_val_f32(llawa_context *ctx, llawa_tensor *src0, uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3) {
     return *(float *)
             (src0->data +
-             (d0 + src0->stride[0]) * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-             (d1 + src0->stride[1]) * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
-             (d2 + src0->stride[2]) * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-             (d3 + src0->stride[3]) * llawa_sizeof_dtype(src0->dtype));
+             d0 * (src0->stride[0] * llawa_sizeof_dtype(src0->dtype)) +
+             d1 * (src0->stride[1] * llawa_sizeof_dtype(src0->dtype)) +
+             d2 * (src0->stride[2] * llawa_sizeof_dtype(src0->dtype)) +
+             d3 * (src0->stride[3] * llawa_sizeof_dtype(src0->dtype)));
 }
 
 void llawa_tensor_set_val_i32(
@@ -196,11 +202,12 @@ void llawa_tensor_set_val_i32(
         int32_t val
 ) {
     assert(src0->dtype == LLAWA_I32);
-    *(int32_t *) (src0->data +
-                  (d0 + src0->stride[0]) * (src0->ne[1] * src0->ne[2] * src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                  (d1 + src0->stride[1]) * (src0->ne[2] * src0->ne[3]) * llawa_sizeof_dtype(src0->dtype) +
-                  (d2 + src0->stride[2]) * (src0->ne[3] * llawa_sizeof_dtype(src0->dtype)) +
-                  (d3 + src0->stride[3]) * llawa_sizeof_dtype(src0->dtype)) = val;
+    *(int32_t *)
+            (src0->data +
+             d0 * (src0->stride[0] * llawa_sizeof_dtype(src0->dtype)) +
+             d1 * (src0->stride[1] * llawa_sizeof_dtype(src0->dtype)) +
+             d2 * (src0->stride[2] * llawa_sizeof_dtype(src0->dtype)) +
+             d3 * (src0->stride[3] * llawa_sizeof_dtype(src0->dtype))) = val;
 }
 
 size_t llawa_sizeof_dtype(llawa_dtype dtype) {
@@ -217,9 +224,9 @@ llawa_tensor *llawa_get_rows(llawa_context *ctx, llawa_tensor *src, llawa_tensor
             // data[ids[i]][j][1][1] = src[ids[i]][j][1][1]
             // no strides ?
             uint32_t sub = *(int32_t *) (ids->data + i * llawa_sizeof_dtype(ids->dtype));
-            float v = *(float *) (src->data + sub * (src->ne[1] * llawa_sizeof_dtype(src->dtype)) +
+            float v = *(float *) (src->data + sub * (src->stride[0] * llawa_sizeof_dtype(src->dtype)) +
                                   j * llawa_sizeof_dtype(src->dtype));
-            *(float *) (res->data + i * (src->ne[1] * llawa_sizeof_dtype(src->dtype)) +
+            *(float *) (res->data + i * (src->stride[0] * llawa_sizeof_dtype(src->dtype)) +
                         j * llawa_sizeof_dtype(src->dtype)) = v;
         }
     }
@@ -393,24 +400,106 @@ int llawa_new_axis(llawa_context *ctx, llawa_tensor *src, int t0, llawa_tensor *
     for (int i = 2; i >= 0; i--) dst->ne[i + 1] = dst->ne[i];
     dst->ne[0] = 1;
     dst->ne[t0] = 1;
+    LLAWA_INIT_STRIDE(dst->stride, dst->ne);
     return 0;
 }
 
 int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, llawa_tensor *dst) {
-    assert(src0->ne[1] == src1->ne[0]);
+//    assert(src0->ne[1] == src1->ne[0]);
 
-#pragma omp parallel for
-    for (int i = 0; i < src0->ne[0]; i++) {
-        for (int j = 0; j < src1->ne[1]; j++) {
-            float c = 0;
-            for (int k = 0; k < src0->ne[1]; k++) {
-                c = llawa_tensor_get_val_f32(ctx, src0, i, k, 0, 0) * llawa_tensor_get_val_f32(ctx, src1, k, j, 0, 0);
+    if (src0->ne[0] == src1->ne[0] && src0->ne[1] == src1->ne[1]) {
+        for (int p = 0; p < src0->ne[0]; p++) {
+            for (int q = 0; q < src0->ne[1]; q++) {
+
+                for (int i = 0; i < src0->ne[2]; i++) {
+                    for (int j = 0; j < src1->ne[3]; j++) {
+                        float c = 0;
+                        for (int k = 0; k < src0->ne[3]; k++) {
+                            c += llawa_tensor_get_val_f32(ctx, src0, p, q, i, k) *
+                                 llawa_tensor_get_val_f32(ctx, src1, p, q, k, j);
+                        }
+                        llawa_tensor_set_val_f32(ctx, dst, p, q, i, j, c);
+                    }
+                }
+
             }
-            llawa_tensor_set_val_f32(ctx, dst, i, j, 0, 0, c);
+        }
+    } else if (src0->ne[0] == src1->ne[0]) {
+        assert(src0->ne[3] == 1);
+        for (int p = 0; p < src0->ne[0]; p++) {
+
+            for (int i = 0; i < src0->ne[1]; i++) {
+                for (int j = 0; j < src1->ne[2]; j++) {
+                    float c = 0;
+                    for (int k = 0; k < src0->ne[2]; k++) {
+                        c += llawa_tensor_get_val_f32(ctx, src0, p, i, k, 0) *
+                             llawa_tensor_get_val_f32(ctx, src1, p, k, j, 0);
+                    }
+                    llawa_tensor_set_val_f32(ctx, dst, p, i, j, 0, c);
+                }
+            }
+
+        }
+    } else {
+        assert(src0->ne[3] == 1 && src0->ne[2] == 1);
+        for (int i = 0; i < src0->ne[0]; i++) {
+            for (int j = 0; j < src1->ne[1]; j++) {
+                float c = 0;
+                for (int k = 0; k < src0->ne[1]; k++) {
+                    c += llawa_tensor_get_val_f32(ctx, src0, i, k, 0, 0) *
+                         llawa_tensor_get_val_f32(ctx, src1, k, j, 0, 0);
+                }
+                llawa_tensor_set_val_f32(ctx, dst, i, j, 0, 0, c);
+            }
         }
     }
 
     return 0;
 }
 
+llawa_tensor **llawa_split(llawa_context *ctx, llawa_tensor *src, uint32_t sz, uint32_t dim, uint32_t *n) {
+    assert(src->ne[dim] % sz == 0);
 
+    *n = src->ne[dim] / sz;
+    llawa_tensor **dst = malloc(sizeof(llawa_tensor *) * (*n));
+
+    for (int i = 0; i < *n; i++) {
+        uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+        uint32_t *stride = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+        memcpy(ne, src->ne, sizeof(uint32_t) * LLAWA_MAX_DIM);
+        memcpy(stride, src->stride, sizeof(uint32_t) * LLAWA_MAX_DIM);
+        ne[dim] = sz;
+//        stride[dim] += sz * i;
+        llawa_tensor *new_tensor = llawa_new_tensor(
+                ctx,
+                src->dtype,
+                src->n_dim,
+                ne,
+                stride,
+                src->data + sz * i * llawa_sizeof_dtype(src->dtype)
+        );
+        dst[i] = new_tensor;
+    }
+    return dst;
+}
+
+llawa_tensor *llawa_view(llawa_context *ctx, llawa_tensor *src,
+                         uint32_t new_n_dim,
+                         const uint32_t new_ne[LLAWA_MAX_DIM]) {
+    uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    uint32_t *stride = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    for (int i = 0; i < LLAWA_MAX_DIM; i++) { ne[i] = new_ne[i]; }
+    LLAWA_INIT_STRIDE(stride, ne);
+    for (int i = 0; i < LLAWA_MAX_DIM; i++)
+        if (src->ne[i] == new_ne[i]) stride[i] = src->stride[i];
+
+    return llawa_new_tensor(ctx, src->dtype, new_n_dim, ne, stride, src->data);
+}
+
+llawa_tensor *llawa_permute(llawa_context *ctx, llawa_tensor *src, const uint32_t *pm_ne) {
+    uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    uint32_t *stride = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    for (int i = 0; i < LLAWA_MAX_DIM; i++) ne[i] = src->ne[pm_ne[i]], stride[i] = src->stride[pm_ne[i]];
+//    LLAWA_INIT_STRIDE(stride, ne);
+    return llawa_new_tensor(ctx, src->dtype, src->n_dim, ne, stride, src->data);
+}
