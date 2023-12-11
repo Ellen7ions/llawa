@@ -21,6 +21,7 @@ typedef enum llawa_ops {
     LLAWA_MUL,
     LLAWA_DIV,
     LLAWA_SQRT,
+    LLAWA_EXP,
     LLAWA_OPS_COUNT
 } llawa_ops;
 
@@ -277,6 +278,9 @@ int llawa_exec_ops(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, l
                         case LLAWA_SQRT:
                             llawa_tensor_set_val_f32(ctx, dst, i, j, k, q, sqrtf(v0));
                             break;
+                        case LLAWA_EXP:
+                            llawa_tensor_set_val_f32(ctx, dst, i, j, k, q, expf(v0));
+                            break;
                         default:
                             assert(0);
                     }
@@ -308,8 +312,12 @@ int llawa_sqrt(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst) {
     return llawa_exec_ops(ctx, src0, NULL, dst, LLAWA_SQRT);
 }
 
+int llawa_exp(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst) {
+    return llawa_exec_ops(ctx, src0, NULL, dst, LLAWA_EXP);
+}
 
-int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst) {
+
+int llawa_acc_f32(llawa_context *ctx, llawa_tensor *inp, int dim, float factor, llawa_tensor *dst) {
     assert(inp->dtype == LLAWA_F32);
 
     llawa_tensor *res = dst;
@@ -323,7 +331,7 @@ int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst
                         for (int i = 0; i < inp->ne[0]; i++)
                             c += llawa_tensor_get_val_f32(ctx, inp, i, j, k, q);
 
-                        llawa_tensor_set_val_f32(ctx, res, 0, j, k, q, c / ((float) inp->ne[0]));
+                        llawa_tensor_set_val_f32(ctx, res, 0, j, k, q, c / factor);
                     }
                 }
             }
@@ -336,7 +344,7 @@ int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst
                         float c = 0;
                         for (int j = 0; j < inp->ne[1]; j++)
                             c += llawa_tensor_get_val_f32(ctx, inp, i, j, k, q);
-                        llawa_tensor_set_val_f32(ctx, res, i, 0, k, q, c / ((float) inp->ne[1]));
+                        llawa_tensor_set_val_f32(ctx, res, i, 0, k, q, c / factor);
                     }
                 }
             break;
@@ -347,7 +355,7 @@ int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst
                         float c = 0;
                         for (int k = 0; k < inp->ne[2]; k++)
                             c += llawa_tensor_get_val_f32(ctx, inp, i, j, k, q);
-                        llawa_tensor_set_val_f32(ctx, res, i, j, 0, q, c / ((float) inp->ne[2]));
+                        llawa_tensor_set_val_f32(ctx, res, i, j, 0, q, c / factor);
                     }
                 }
             break;
@@ -358,7 +366,7 @@ int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst
                         float c = 0;
                         for (int q = 0; q < inp->ne[3]; q++)
                             c += llawa_tensor_get_val_f32(ctx, inp, i, j, k, q);
-                        llawa_tensor_set_val_f32(ctx, res, i, j, k, 0, c / ((float) inp->ne[3]));
+                        llawa_tensor_set_val_f32(ctx, res, i, j, k, 0, c / factor);
                     }
                 }
             break;
@@ -368,6 +376,19 @@ int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst
 
     return 0;
 }
+
+int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst) {
+    assert(inp->dtype == LLAWA_F32);
+    llawa_acc_f32(ctx, inp, dim, (float) inp->ne[1], dst);
+    return 0;
+}
+
+int llawa_sum(llawa_context *ctx, llawa_tensor *src, int dim, llawa_tensor *dst) {
+    assert(src->dtype == LLAWA_F32);
+    llawa_acc_f32(ctx, src, dim, 1, dst);
+    return 0;
+}
+
 
 int llawa_std(llawa_context *ctx, llawa_tensor *inp, llawa_tensor *mean, int dim, llawa_tensor *dst) {
     assert(mean->ne[dim] == 1);
@@ -398,9 +419,10 @@ int llawa_new_axis(llawa_context *ctx, llawa_tensor *src, int t0, llawa_tensor *
         assert(src->ne[3] == 1);
     }
     for (int i = 2; i >= 0; i--) dst->ne[i + 1] = dst->ne[i];
+    for (int i = 2; i >= 0; i--) dst->stride[i + 1] = dst->stride[i];
     dst->ne[0] = 1;
     dst->ne[t0] = 1;
-    LLAWA_INIT_STRIDE(dst->stride, dst->ne);
+    dst->stride[t0] = 1;
     return 0;
 }
 
@@ -503,3 +525,20 @@ llawa_tensor *llawa_permute(llawa_context *ctx, llawa_tensor *src, const uint32_
 //    LLAWA_INIT_STRIDE(stride, ne);
     return llawa_new_tensor(ctx, src->dtype, src->n_dim, ne, stride, src->data);
 }
+
+int llawa_softmax(llawa_context *ctx, llawa_tensor *src, int dim, llawa_tensor *dst) {
+//    llawa_tensor *exp_src = llawa_zeros_like(ctx, src);
+
+    llawa_exp(ctx, src, dst);
+    uint32_t ne[LLAWA_MAX_DIM], stride[LLAWA_MAX_DIM];
+    for (int i = 0; i < LLAWA_MAX_DIM; i++) ne[i] = src->ne[i];
+    if (dim < 0) dim = src->n_dim + dim;
+    ne[dim] = 1;
+    LLAWA_INIT_STRIDE(stride, ne);
+    llawa_tensor *sum_dst = llawa_new_tensor(ctx, src->dtype, src->n_dim, ne, stride, NULL);
+    llawa_sum(ctx, dst, dim, sum_dst);
+    llawa_div(ctx, dst, sum_dst, dst);
+
+    return 0;
+}
+

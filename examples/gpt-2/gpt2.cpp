@@ -258,6 +258,7 @@ llawa_tensor *gpt2_attention(
     llawa_mul_dot(&model.context, qk_dst, llawa_scalar(&model.context, LLAWA_F32, &scale), qk_dst);
 
     llawa_tensor *mask = gpt2_mask(model, bias, qk_dst->ne[1]);
+    llawa_new_axis(&model.context, mask, 0, mask);
     llawa_tensor *neg_mask = llawa_zeros_like(&model.context, mask);
 
     {
@@ -272,7 +273,7 @@ llawa_tensor *gpt2_attention(
         llawa_add(&model.context, qk_dst, neg_mask, qk_dst);
     }
 
-//    llawa_softmax(&model.context, qk_dst, dim, qk_dst);
+    llawa_softmax(&model.context, qk_dst, -1, qk_dst);
 
     auto res = llawa_zeros_like(&model.context, inp);
     llawa_mat_mul(&model.context, qk_dst, v, res);

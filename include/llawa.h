@@ -141,6 +141,8 @@ llawa_tensor *llawa_get_rows(llawa_context *ctx, llawa_tensor *src, llawa_tensor
 
 int llawa_mean(llawa_context *ctx, llawa_tensor *inp, int dim, llawa_tensor *dst);
 
+int llawa_sum(llawa_context *ctx, llawa_tensor *src, int dim, llawa_tensor *dst);
+
 int llawa_std(llawa_context *ctx, llawa_tensor *inp, llawa_tensor *mean, int dim, llawa_tensor *dst);
 
 int llawa_mul_dot(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, llawa_tensor *dst);
@@ -152,6 +154,8 @@ int llawa_sub(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, llawa_
 int llawa_div(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, llawa_tensor *dst);
 
 int llawa_sqrt(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst);
+
+int llawa_exp(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst);
 
 llawa_tensor *llawa_scalar(llawa_context *ctx, llawa_dtype dtype, void *val);
 
@@ -165,6 +169,8 @@ llawa_tensor *
 llawa_view(llawa_context *ctx, llawa_tensor *src, uint32_t new_n_dim, const uint32_t new_ne[LLAWA_MAX_DIM]);
 
 llawa_tensor *llawa_permute(llawa_context *ctx, llawa_tensor *src, const uint32_t pm_ne[LLAWA_MAX_DIM]);
+
+int llawa_softmax(llawa_context *ctx, llawa_tensor *src, int dim, llawa_tensor *dst);
 
 #ifdef __cplusplus
 };
