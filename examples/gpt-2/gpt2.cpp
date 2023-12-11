@@ -150,6 +150,7 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
         fs.read((char *) (&length), sizeof(uint32_t));
         fs.read((char *) (&dtype), sizeof(uint32_t));
         uint32_t ne[LLAWA_MAX_DIM] = {1, 1, 1, 1};
+        uint32_t stride[LLAWA_MAX_DIM] = {0, 0, 0, 0};
         for (int i = 0; i < n_dims; i++) fs.read((char *) (ne + i), sizeof(uint32_t));
 
         char buf[128];
@@ -163,7 +164,8 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
         }
         std::cerr << "]" << std::endl;
 #endif
-        auto tensor = llawa_new_tensor(&model.context, static_cast<llawa_dtype>(dtype), n_dims, ne, NULL);
+        auto tensor = llawa_new_tensor(&model.context, static_cast<llawa_dtype>(dtype),
+                                       n_dims, ne, stride, nullptr);
         model.tensors[name] = tensor;
         uint32_t bytes_sz = llawa_tensor_bytes_size(tensor);
         fs.read((char *) (tensor->data), bytes_sz);
@@ -216,23 +218,24 @@ llawa_tensor *gpt2_attention(
     llawa_new_axis(&model.context, attn_bias, 0, attn_bias);
     llawa_add(&model.context, qkv, attn_bias, qkv);
 
-    
+
+
     return res;
 }
 
 llawa_tensor *gpt2_layer_forward(gpt2 &model, llawa_tensor *inp, int c_layer) {
-    // atten
+    // attn
     {
         llawa_tensor *norm = gpt2_layer_norm(
                 model, inp,
                 model.tensors["h." + std::to_string(c_layer) + ".ln_1.weight"],
                 model.tensors["h." + std::to_string(c_layer) + ".ln_1.bias"]
         );
-        llawa_add(&model.context, inp, norm, inp);
+
 
         llawa_tensor *x_attn = gpt2_attention(
                 model,
-                inp,
+                norm,
                 model.tensors["h." + std::to_string(c_layer) + ".attn.bias"],
                 model.tensors["h." + std::to_string(c_layer) + ".attn.c_attn.weight"],
                 model.tensors["h." + std::to_string(c_layer) + ".attn.c_attn.bias"],
@@ -240,7 +243,8 @@ llawa_tensor *gpt2_layer_forward(gpt2 &model, llawa_tensor *inp, int c_layer) {
                 model.tensors["h." + std::to_string(c_layer) + ".attn.c_proj.bias"]
         );
 
-//        norm = gpt2_layer_norm(model, inp);
+        llawa_add(&model.context, inp, x_attn, inp);
+
     }
 
     // mlp
@@ -286,7 +290,7 @@ int gpt2_forward(
     for (int c_layer = 0; c_layer < model.hparams.n_layer; c_layer++) {
 //        auto *kv_cache = llawa_new_tensor(&model.context, LLAWA_F32,);
         cur = gpt2_layer_forward(model, cur, c_layer);
-//        break;
+        break;
 //        present_cache->push_back(kv_cache);
     }
 //
