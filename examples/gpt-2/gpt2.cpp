@@ -8,6 +8,7 @@
 #include <map>
 #include <vector>
 #include <regex>
+#include <cmath>
 
 #include "llawa.h"
 
@@ -152,6 +153,7 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
         uint32_t ne[LLAWA_MAX_DIM] = {1, 1, 1, 1};
         uint32_t stride[LLAWA_MAX_DIM] = {0, 0, 0, 0};
         for (int i = 0; i < n_dims; i++) fs.read((char *) (ne + i), sizeof(uint32_t));
+        LLAWA_INIT_STRIDE(stride, ne);
 
         char buf[128];
         fs.read(buf, length);
@@ -202,6 +204,25 @@ llawa_tensor *gpt2_layer_norm(gpt2 &model, llawa_tensor *inp, llawa_tensor *w, l
     return res;
 }
 
+llawa_tensor *gpt2_split_heads(gpt2 &model, llawa_tensor *tensor, bool is_key = false) {
+    assert(tensor->n_dim == 2);
+    uint32_t heads = model.hparams.n_head;
+    uint32_t ne[LLAWA_MAX_DIM] = {tensor->ne[0], heads, tensor->ne[1] / heads, 1};
+    auto res = llawa_view(&model.context, tensor, 3, ne);
+    uint32_t pm_ne[LLAWA_MAX_DIM] = {1, 0, 2, 3};
+    if (is_key) {
+        pm_ne[1] = 2, pm_ne[2] = 0;
+        return llawa_permute(&model.context, res, pm_ne);
+    }
+    return llawa_permute(&model.context, res, pm_ne);
+}
+
+llawa_tensor *gpt2_mask(gpt2 &model, llawa_tensor *bias, int seq_n) {
+    auto res = llawa_new_tensor2d(&model.context, bias->dtype, seq_n, seq_n, bias->data);
+    res->stride[0] = bias->stride[2];
+    return res;
+}
+
 llawa_tensor *gpt2_attention(
         gpt2 &model,
         llawa_tensor *inp,
@@ -211,15 +232,50 @@ llawa_tensor *gpt2_attention(
         llawa_tensor *proj_w,
         llawa_tensor *proj_bias
 ) {
-    llawa_tensor *res = llawa_zeros_like(&model.context, inp);
     llawa_tensor *qkv = llawa_new_tensor2d(&model.context, LLAWA_F32,
                                            inp->ne[0], attn_w->ne[1], nullptr);
     llawa_mat_mul(&model.context, inp, attn_w, qkv);
     llawa_new_axis(&model.context, attn_bias, 0, attn_bias);
     llawa_add(&model.context, qkv, attn_bias, qkv);
 
+    uint32_t n3;
+    llawa_tensor **qkv_splits = nullptr, *q, *k, *v;
+    qkv_splits = llawa_split(&model.context, qkv, inp->ne[1], 1, &n3);
 
+    q = qkv_splits[0];
+    k = qkv_splits[1];
+    v = qkv_splits[2];
 
+    q = gpt2_split_heads(model, q);
+    k = gpt2_split_heads(model, k, true);
+    v = gpt2_split_heads(model, v);
+
+    llawa_tensor *qk_dst = llawa_new_tensor4d(&model.context, LLAWA_F32, q->ne[0], q->ne[1], q->ne[1], 1, nullptr);
+    qk_dst->n_dim = 3;
+
+    llawa_mat_mul(&model.context, q, k, qk_dst);
+    float scale = 1. / sqrt(v->ne[2]);
+    llawa_mul_dot(&model.context, qk_dst, llawa_scalar(&model.context, LLAWA_F32, &scale), qk_dst);
+
+    llawa_tensor *mask = gpt2_mask(model, bias, qk_dst->ne[1]);
+    llawa_tensor *neg_mask = llawa_zeros_like(&model.context, mask);
+
+    {
+        float k = -1;
+        llawa_mul_dot(&model.context, mask, llawa_scalar(&model.context, LLAWA_F32, &k), neg_mask);
+        k = 1;
+        llawa_add(&model.context, neg_mask, llawa_scalar(&model.context, LLAWA_F32, &k), neg_mask);
+        float inf = -1e10;
+        llawa_mul_dot(&model.context, neg_mask, llawa_scalar(&model.context, LLAWA_F32, &inf), neg_mask);
+
+        llawa_mul_dot(&model.context, qk_dst, mask, qk_dst);
+        llawa_add(&model.context, qk_dst, neg_mask, qk_dst);
+    }
+
+//    llawa_softmax(&model.context, qk_dst, dim, qk_dst);
+
+    auto res = llawa_zeros_like(&model.context, inp);
+    llawa_mat_mul(&model.context, qk_dst, v, res);
     return res;
 }
 
