@@ -217,6 +217,23 @@ llawa_tensor *gpt2_split_heads(gpt2 &model, llawa_tensor *tensor, bool is_key = 
     return llawa_permute(&model.context, res, pm_ne);
 }
 
+llawa_tensor *gpt2_merge_heads(gpt2 &model, llawa_tensor *tensor) {
+    assert(tensor->n_dim == 3);
+    uint32_t pm_ne[LLAWA_MAX_DIM] = {1, 0, 2, 3};
+    auto res = llawa_permute(&model.context, tensor, pm_ne);
+
+//    for (int i = 0; i < res->ne[1]; i++)
+//        for (int j = 0; j < res->ne[1]; j++)
+//            printf("%f\n", llawa_tensor_get_val_f32(&model.context, res, 0, i, j, 0));
+
+    res = llawa_contiguous(&model.context, res);
+
+    uint32_t heads = model.hparams.n_head;
+    uint32_t ne[LLAWA_MAX_DIM] = {tensor->ne[1], tensor->ne[0] * tensor->ne[2], 1, 1};
+    res = llawa_view(&model.context, res, 2, ne);
+    return res;
+}
+
 llawa_tensor *gpt2_mask(gpt2 &model, llawa_tensor *bias, int seq_n) {
     auto res = llawa_new_tensor2d(&model.context, bias->dtype, seq_n, seq_n, bias->data);
     res->stride[0] = bias->stride[2];
@@ -274,11 +291,15 @@ llawa_tensor *gpt2_attention(
     }
 
     llawa_softmax(&model.context, qk_dst, -1, qk_dst);
-    auto attn_v = llawa_new_tensor3d(&model.context, LLAWA_F32, qk_dst->ne[0], qk_dst->ne[1], v->ne[2], NULL);
-    // TODO: ???
+    auto attn_v = llawa_new_tensor3d(&model.context, LLAWA_F32, qk_dst->ne[0], qk_dst->ne[1], v->ne[2], nullptr);
+
     llawa_mat_mul(&model.context, qk_dst, v, attn_v);
+    attn_v = gpt2_merge_heads(model, attn_v);
 
-
+    llawa_tensor *res = llawa_zeros_like(&model.context, inp);
+    llawa_mat_mul(&model.context, attn_v, proj_w, res);
+    llawa_new_axis(&model.context, proj_bias, 0, proj_bias);
+    llawa_add(&model.context, res, proj_bias, res);
     return res;
 }
 
