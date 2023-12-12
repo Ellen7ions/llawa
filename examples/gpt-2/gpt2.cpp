@@ -303,6 +303,29 @@ llawa_tensor *gpt2_attention(
     return res;
 }
 
+llawa_tensor *gpt2_mlp(
+        gpt2 &model,
+        llawa_tensor *inp,
+        llawa_tensor *mlp_w,
+        llawa_tensor *mlp_bias,
+        llawa_tensor *proj_w,
+        llawa_tensor *proj_bias
+) {
+    llawa_tensor *mlp_dst = llawa_new_tensor2d(&model.context, LLAWA_F32,
+                                           inp->ne[0], mlp_w->ne[1], nullptr);
+    llawa_mat_mul(&model.context, inp, mlp_w, mlp_dst);
+    llawa_new_axis(&model.context, mlp_bias, 0, mlp_bias);
+    llawa_add(&model.context, mlp_dst, mlp_bias, mlp_dst);
+    llawa_gelu(&model.context, mlp_dst, mlp_dst);
+
+    llawa_tensor *proj_dst = llawa_new_tensor2d(&model.context, LLAWA_F32,
+                                                mlp_dst->ne[0], proj_w->ne[1], nullptr);
+    llawa_mat_mul(&model.context, mlp_dst, proj_w, proj_dst);
+    llawa_new_axis(&model.context, proj_bias, 0, proj_bias);
+    llawa_add(&model.context, proj_dst, proj_bias, proj_dst);
+    return proj_dst;
+}
+
 llawa_tensor *gpt2_layer_forward(gpt2 &model, llawa_tensor *inp, int c_layer) {
     // attn
     {
@@ -329,8 +352,25 @@ llawa_tensor *gpt2_layer_forward(gpt2 &model, llawa_tensor *inp, int c_layer) {
 
     // mlp
     {
+        llawa_tensor *norm = gpt2_layer_norm(
+                model, inp,
+                model.tensors["h." + std::to_string(c_layer) + ".ln_2.weight"],
+                model.tensors["h." + std::to_string(c_layer) + ".ln_2.bias"]
+        );
 
+        llawa_tensor *x_mlp = gpt2_mlp(
+                model,
+                norm,
+                model.tensors["h." + std::to_string(c_layer) + ".mlp.c_fc.weight"],
+                model.tensors["h." + std::to_string(c_layer) + ".mlp.c_fc.bias"],
+                model.tensors["h." + std::to_string(c_layer) + ".mlp.c_proj.weight"],
+                model.tensors["h." + std::to_string(c_layer) + ".mlp.c_proj.bias"]
+        );
+
+        llawa_add(&model.context, inp, x_mlp, inp);
     }
+
+    return inp;
 }
 
 int gpt2_forward(
@@ -370,7 +410,7 @@ int gpt2_forward(
     for (int c_layer = 0; c_layer < model.hparams.n_layer; c_layer++) {
 //        auto *kv_cache = llawa_new_tensor(&model.context, LLAWA_F32,);
         cur = gpt2_layer_forward(model, cur, c_layer);
-        break;
+//        break;
 //        present_cache->push_back(kv_cache);
     }
 //
