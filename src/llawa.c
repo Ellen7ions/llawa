@@ -6,6 +6,12 @@
 
 #include "llawa.h"
 
+#ifdef LLAWA_DEBUG
+
+#include <stdio.h>
+
+#endif
+
 #define LLAWA_TENSOR_SIZE sizeof(struct llawa_tensor)
 #define LLAWA_OBJECT_SIZE sizeof(struct llawa_object)
 
@@ -562,5 +568,19 @@ int llawa_softmax(llawa_context *ctx, llawa_tensor *src, int dim, llawa_tensor *
     llawa_div(ctx, dst, sum_dst, dst);
 
     return 0;
+}
+
+llawa_tensor *llawa_contiguous(llawa_context *ctx, llawa_tensor *src) {
+    assert(src->dtype == LLAWA_F32);
+    llawa_tensor *res = llawa_zeros_like(ctx, src);
+    LLAWA_INIT_STRIDE(res->stride, res->ne);
+    for (int i = 0; i < src->ne[0]; i++)
+        for (int j = 0; j < src->ne[1]; j++)
+            for (int k = 0; k < src->ne[2]; k++)
+                for (int q = 0; q < src->ne[3]; q++) {
+                    float v = llawa_tensor_get_val_f32(ctx, src, i, j, k, q);
+                    llawa_tensor_set_val_f32(ctx, res, i, j, k, q, v);
+                }
+    return res;
 }
 

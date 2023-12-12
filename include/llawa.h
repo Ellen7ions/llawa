@@ -181,6 +181,8 @@ llawa_tensor *llawa_permute(llawa_context *ctx, llawa_tensor *src, const uint32_
 
 int llawa_softmax(llawa_context *ctx, llawa_tensor *src, int dim, llawa_tensor *dst);
 
+llawa_tensor *llawa_contiguous(llawa_context *ctx, llawa_tensor *src);
+
 #ifdef __cplusplus
 };
 #endif
