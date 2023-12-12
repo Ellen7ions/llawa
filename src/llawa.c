@@ -28,12 +28,20 @@ typedef enum llawa_ops {
     LLAWA_DIV,
     LLAWA_SQRT,
     LLAWA_EXP,
+    LLAWA_GELU,
     LLAWA_OPS_COUNT
 } llawa_ops;
 
 size_t llawa_dtype_size[LLAWA_COUNT] = {
         1, 2, 4, 2, 4
 };
+
+static const float GELU_COEF_A = 0.044715f;
+static const float SQRT_2_OVER_PI = 0.79788456080286535587989211986876f;
+
+static float llawa_gelu_f32(float x) {
+    return 0.5f * x * (1.0f + tanhf(SQRT_2_OVER_PI * x * (1.0f + GELU_COEF_A * x * x)));
+}
 
 int llawa_context_init(llawa_context *ctx, size_t mem_size) {
     *ctx = (llawa_context) {
@@ -308,6 +316,9 @@ int llawa_exec_ops(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, l
                         case LLAWA_EXP:
                             llawa_tensor_set_val_f32(ctx, dst, i, j, k, q, expf(v0));
                             break;
+                        case LLAWA_GELU:
+                            llawa_tensor_set_val_f32(ctx, dst, i, j, k, q, llawa_gelu_f32(v0));
+                            break;
                         default:
                             assert(0);
                     }
@@ -341,6 +352,10 @@ int llawa_sqrt(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst) {
 
 int llawa_exp(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst) {
     return llawa_exec_ops(ctx, src0, NULL, dst, LLAWA_EXP);
+}
+
+int llawa_gelu(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst) {
+    return llawa_exec_ops(ctx, src0, NULL, dst, LLAWA_GELU);
 }
 
 

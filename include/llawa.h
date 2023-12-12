@@ -166,6 +166,8 @@ int llawa_sqrt(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst);
 
 int llawa_exp(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst);
 
+int llawa_gelu(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *dst);
+
 llawa_tensor *llawa_scalar(llawa_context *ctx, llawa_dtype dtype, void *val);
 
 int llawa_new_axis(llawa_context *ctx, llawa_tensor *src, int t0, llawa_tensor *dst);
