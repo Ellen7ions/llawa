@@ -8,3 +8,6 @@ message(${LLAWA_INCLUDE})
 
 add_executable(test_ops test_ops.cpp)
 target_link_libraries(test_ops llawa)
+
+add_executable(test_mat_mul test_mat_mul.cpp)
+target_link_libraries(test_mat_mul llawa)
