@@ -274,9 +274,11 @@ llawa_tensor *gpt2_attention(
     }
 
     llawa_softmax(&model.context, qk_dst, -1, qk_dst);
+    auto attn_v = llawa_new_tensor3d(&model.context, LLAWA_F32, qk_dst->ne[0], qk_dst->ne[1], v->ne[2], NULL);
+    // TODO: ???
+    llawa_mat_mul(&model.context, qk_dst, v, attn_v);
 
-    auto res = llawa_zeros_like(&model.context, inp);
-    llawa_mat_mul(&model.context, qk_dst, v, res);
+
     return res;
 }
 
