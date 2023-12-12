@@ -96,6 +96,23 @@ llawa_tensor *llawa_new_tensor(
     return new_tensor;
 }
 
+llawa_tensor *llawa_new_tensor1d(
+        llawa_context *ctx,
+        llawa_dtype dtype,
+        uint32_t d0,
+        void *data
+) {
+    uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    uint32_t *stride = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(ne, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
+    memset(stride, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
+    for (int i = 0; i < LLAWA_MAX_DIM; i++) *(ne + i) = 1;
+    *ne = d0;
+
+    LLAWA_INIT_STRIDE(stride, ne);
+    return llawa_new_tensor(ctx, dtype, 1, ne, stride, data);
+}
+
 llawa_tensor *llawa_new_tensor2d(
         llawa_context *ctx,
         llawa_dtype dtype,
@@ -115,10 +132,12 @@ llawa_tensor *llawa_new_tensor2d(
     return llawa_new_tensor(ctx, dtype, 2, ne, stride, data);
 }
 
-llawa_tensor *llawa_new_tensor1d(
+llawa_tensor *llawa_new_tensor3d(
         llawa_context *ctx,
         llawa_dtype dtype,
         uint32_t d0,
+        uint32_t d1,
+        uint32_t d2,
         void *data
 ) {
     uint32_t *ne = malloc(sizeof(uint32_t) * LLAWA_MAX_DIM);
@@ -127,9 +146,11 @@ llawa_tensor *llawa_new_tensor1d(
     memset(stride, 0, sizeof(uint32_t) * LLAWA_MAX_DIM);
     for (int i = 0; i < LLAWA_MAX_DIM; i++) *(ne + i) = 1;
     *ne = d0;
+    *(ne + 1) = d1;
+    *(ne + 2) = d2;
 
     LLAWA_INIT_STRIDE(stride, ne);
-    return llawa_new_tensor(ctx, dtype, 1, ne, stride, data);
+    return llawa_new_tensor(ctx, dtype, 3, ne, stride, data);
 }
 
 llawa_tensor *llawa_new_tensor4d(
@@ -429,7 +450,7 @@ int llawa_new_axis(llawa_context *ctx, llawa_tensor *src, int t0, llawa_tensor *
 int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, llawa_tensor *dst) {
 //    assert(src0->ne[1] == src1->ne[0]);
 
-    if (src0->ne[0] == src1->ne[0] && src0->ne[1] == src1->ne[1]) {
+    if (src0->n_dim == 4 && src1->n_dim == 4 && src0->ne[0] == src1->ne[0] && src0->ne[1] == src1->ne[1]) {
         for (int p = 0; p < src0->ne[0]; p++) {
             for (int q = 0; q < src0->ne[1]; q++) {
 
@@ -446,7 +467,7 @@ int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, ll
 
             }
         }
-    } else if (src0->ne[0] == src1->ne[0]) {
+    } else if (src0->n_dim == 3 && src1->n_dim == 3 && src0->ne[0] == src1->ne[0]) {
         assert(src0->ne[3] == 1);
         for (int p = 0; p < src0->ne[0]; p++) {
 
@@ -462,7 +483,7 @@ int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, ll
             }
 
         }
-    } else {
+    } else if (src0->n_dim == 2 && src1->n_dim == 2) {
         assert(src0->ne[3] == 1 && src0->ne[2] == 1);
         for (int i = 0; i < src0->ne[0]; i++) {
             for (int j = 0; j < src1->ne[1]; j++) {
@@ -474,7 +495,8 @@ int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, ll
                 llawa_tensor_set_val_f32(ctx, dst, i, j, 0, 0, c);
             }
         }
-    }
+    } else
+        assert(0);
 
     return 0;
 }

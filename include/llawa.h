@@ -100,6 +100,15 @@ llawa_tensor *llawa_new_tensor2d(
         void *data
 );
 
+llawa_tensor *llawa_new_tensor3d(
+        llawa_context *ctx,
+        llawa_dtype dtype,
+        uint32_t d0,
+        uint32_t d1,
+        uint32_t d2,
+        void *data
+);
+
 llawa_tensor *llawa_new_tensor1d(
         llawa_context *ctx,
         llawa_dtype dtype,
