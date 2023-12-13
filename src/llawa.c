@@ -474,8 +474,7 @@ int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, ll
     if (src0->n_dim == 4 && src1->n_dim == 4 && src0->ne[0] == src1->ne[0] && src0->ne[1] == src1->ne[1]) {
         for (int p = 0; p < src0->ne[0]; p++) {
             for (int q = 0; q < src0->ne[1]; q++) {
-#pragma omp parallel
-#pragma parallel for
+#pragma omp parallel for
                 for (int i = 0; i < src0->ne[2]; i++) {
                     for (int j = 0; j < src1->ne[3]; j++) {
                         float c = 0;
@@ -492,8 +491,7 @@ int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, ll
     } else if (src0->n_dim == 3 && src1->n_dim == 3 && src0->ne[0] == src1->ne[0]) {
         assert(src0->ne[3] == 1);
         for (int p = 0; p < src0->ne[0]; p++) {
-#pragma omp parallel
-#pragma parallel for
+#pragma omp parallel for
             for (int i = 0; i < src0->ne[1]; i++) {
                 for (int j = 0; j < src1->ne[2]; j++) {
                     float c = 0;
@@ -508,8 +506,7 @@ int llawa_mat_mul(llawa_context *ctx, llawa_tensor *src0, llawa_tensor *src1, ll
         }
     } else if (src0->n_dim == 2 && src1->n_dim == 2) {
         assert(src0->ne[3] == 1 && src0->ne[2] == 1);
-#pragma omp parallel
-#pragma parallel for
+#pragma omp parallel for
         for (int i = 0; i < src0->ne[0]; i++) {
             for (int j = 0; j < src1->ne[1]; j++) {
                 float c = 0;
