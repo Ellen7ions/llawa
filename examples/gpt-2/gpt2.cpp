@@ -72,12 +72,14 @@ bool gpt2_context_init(gpt2 &model) {
 
         ctx_size += (6 + 12 * n_layer) * 512; // object overhead
 
+#ifdef LLAWA_DEBUG
         printf("%s: llawa ctx size = %6.2f MB\n", __func__, ctx_size / (1024.0 * 1024.0));
+#endif
     }
     return llawa_context_init(&model.context, ctx_size);
 }
 
-bool gpt2_load(gpt2 &model, const std::string &filename, bool verbose) {
+bool gpt2_load(gpt2 &model, const std::string &filename) {
     auto fs = std::ifstream(filename, std::ios::binary);
 
     if (!fs.is_open()) {
@@ -103,14 +105,13 @@ bool gpt2_load(gpt2 &model, const std::string &filename, bool verbose) {
         fs.read((char *) (&hparams->n_layer), 4);
         fs.read((char *) (&hparams->ftype), 4);
 #ifdef LLAWA_DEBUG
-        if (verbose)
-            std::cerr <<
-                      "n_vocab  : " << hparams->n_vocab << std::endl <<
-                      "n_ctx    : " << hparams->n_ctx << std::endl <<
-                      "n_embd   : " << hparams->n_embd << std::endl <<
-                      "n_head   : " << hparams->n_head << std::endl <<
-                      "n_layer  : " << hparams->n_layer << std::endl <<
-                      "ftype    : " << hparams->ftype << std::endl;
+        std::cerr <<
+                  "n_vocab  : " << hparams->n_vocab << std::endl <<
+                  "n_ctx    : " << hparams->n_ctx << std::endl <<
+                  "n_embd   : " << hparams->n_embd << std::endl <<
+                  "n_head   : " << hparams->n_head << std::endl <<
+                  "n_layer  : " << hparams->n_layer << std::endl <<
+                  "ftype    : " << hparams->ftype << std::endl;
 #endif
 
     }
@@ -162,13 +163,11 @@ bool gpt2_load(gpt2 &model, const std::string &filename, bool verbose) {
         std::string name(buf, length);
 
 #ifdef LLAWA_DEBUG
-        if (verbose) {
-            std::cerr << "load tensor: " << name << " -> [";
-            for (int i = 0; i < n_dims; i++) {
-                std::cerr << ne[i] << ", ";
-            }
-            std::cerr << "]" << std::endl;
+        std::cerr << "load tensor: " << name << " -> [";
+        for (int i = 0; i < n_dims; i++) {
+            std::cerr << ne[i] << ", ";
         }
+        std::cerr << "]" << std::endl;
 #endif
         auto tensor = llawa_new_tensor(&model.context, static_cast<llawa_dtype>(dtype),
                                        n_dims, ne, stride, nullptr);
@@ -209,7 +208,7 @@ llawa_tensor *gpt2_layer_norm(gpt2 &model, llawa_tensor *inp, llawa_tensor *w, l
 }
 
 llawa_tensor *gpt2_split_heads(gpt2 &model, llawa_tensor *tensor, bool is_key = false) {
-    assert(tensor->n_dim == 2);
+    LLAWA_ASSERT(tensor->n_dim == 2);
     uint32_t heads = model.hparams.n_head;
     uint32_t ne[LLAWA_MAX_DIM] = {tensor->ne[0], heads, tensor->ne[1] / heads, 1};
     auto res = llawa_view(&model.context, tensor, 3, ne);
@@ -222,7 +221,7 @@ llawa_tensor *gpt2_split_heads(gpt2 &model, llawa_tensor *tensor, bool is_key = 
 }
 
 llawa_tensor *gpt2_merge_heads(gpt2 &model, llawa_tensor *tensor) {
-    assert(tensor->n_dim == 3);
+    LLAWA_ASSERT(tensor->n_dim == 3);
     uint32_t pm_ne[LLAWA_MAX_DIM] = {1, 0, 2, 3};
     auto res = llawa_permute(&model.context, tensor, pm_ne);
 
@@ -420,7 +419,7 @@ int gpt2_forward(
 //
     cur = gpt2_layer_norm(model, cur, model.tensors["ln_f.weight"], model.tensors["ln_f.bias"]);
     uint32_t pne[4] = {1, 0, 2, 3};
-    llawa_tensor *logits_tensor = llawa_zeros_like(&model.context, cur);
+    llawa_tensor *logits_tensor = llawa_new_tensor2d(&model.context, LLAWA_F32, cur->ne[0], wte->ne[0], nullptr);
     llawa_mat_mul(&model.context, cur, llawa_permute(&model.context, wte, pne), logits_tensor);
     cur = logits_tensor;
 //    ret_present_cache = present_cache;
@@ -474,7 +473,7 @@ std::vector<int> gpt_tokenize(const gpt2 &context, const std::string &text) {
     return tokens;
 }
 
-std::string gpt2_sampling(
+int gpt2_sampling(
         gpt2 &model,
         std::vector<float> &logits,
         float temperature,
@@ -516,7 +515,7 @@ std::string gpt2_sampling(
     int idx = dist(rng);
 
     int id = topk_logits[idx].first;
-    return model.id_to_token[id];
+    return id;
 }
 
 int main(int argc, char *argv[]) {
@@ -525,14 +524,15 @@ int main(int argc, char *argv[]) {
     gpt2 model;
 
     std::string prompt = "This is a story about ";
-    int max_token = 5;
+    int max_token = 200;
 
+    gpt2_load(model, model_path);
+    auto prompt_tokens = gpt_tokenize(model, prompt);
+    auto pos = std::vector<int>();
+    for (auto i = 0; i < prompt_tokens.size(); i++) pos.push_back(i);
+
+    std::cout << prompt << std::endl;
     for (int step = 0; step < max_token; step++) {
-        std::cout << prompt << std::endl;
-        gpt2_load(model, model_path, false);
-        auto prompt_tokens = gpt_tokenize(model, prompt);
-        auto pos = std::vector<int>();
-        for (auto i = 0; i < prompt_tokens.size(); i++) pos.push_back(i);
 
         auto *ret_logits = new std::vector<float>;
         auto *ret_present_cache = new std::vector<int>;
@@ -540,10 +540,14 @@ int main(int argc, char *argv[]) {
                      nullptr,
                      ret_logits,
                      ret_present_cache);
-        std::string token = gpt2_sampling(model, *ret_logits, 0.8, 5, rng);
-        prompt += (token + " ");
+
+        int token = gpt2_sampling(model, *ret_logits, 0.8, 5, rng);
+        prompt_tokens.push_back(token);
+        std::cout << model.id_to_token[token];
         llawa_context_destroy(&model.context);
+        gpt2_load(model, model_path);
     }
 
+    llawa_context_destroy(&model.context);
     return 0;
 }
