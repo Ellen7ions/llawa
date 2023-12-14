@@ -32,9 +32,11 @@ extern "C" {
 #ifdef LLAWA_DEBUG
 
 #include <assert.h>
-
 #define LLAWA_ASSERT(x) assert(x)
+#else
+#define LLAWA_ASSERT(x)
 #endif
+
 
 #include <stdlib.h>
 #include <stdint.h>
