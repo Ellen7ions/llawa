@@ -54,6 +54,12 @@ int llawa_context_init(llawa_context *ctx, size_t mem_size) {
     return 1;
 }
 
+int llawa_context_destroy(llawa_context *ctx) {
+    ctx->end_offset = 0;
+    free(ctx->mem);
+    return 0;
+}
+
 /**
  * Memory Layout:
  * |obj | tensor | data |

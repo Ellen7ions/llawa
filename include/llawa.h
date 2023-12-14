@@ -83,6 +83,8 @@ typedef struct llawa_context {
 
 int llawa_context_init(llawa_context *ctx, size_t mem_size);
 
+int llawa_context_destroy(llawa_context *ctx);
+
 llawa_tensor *llawa_new_tensor(
         llawa_context *ctx,
         llawa_dtype dtype,

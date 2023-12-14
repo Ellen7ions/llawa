@@ -9,6 +9,7 @@
 #include <vector>
 #include <regex>
 #include <cmath>
+#include <random>
 
 #include "llawa.h"
 
@@ -76,7 +77,7 @@ bool gpt2_context_init(gpt2 &model) {
     return llawa_context_init(&model.context, ctx_size);
 }
 
-bool gpt2_load(gpt2 &model, const std::string &filename) {
+bool gpt2_load(gpt2 &model, const std::string &filename, bool verbose) {
     auto fs = std::ifstream(filename, std::ios::binary);
 
     if (!fs.is_open()) {
@@ -102,13 +103,14 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
         fs.read((char *) (&hparams->n_layer), 4);
         fs.read((char *) (&hparams->ftype), 4);
 #ifdef LLAWA_DEBUG
-        std::cerr <<
-                  "n_vocab  : " << hparams->n_vocab << std::endl <<
-                  "n_ctx    : " << hparams->n_ctx << std::endl <<
-                  "n_embd   : " << hparams->n_embd << std::endl <<
-                  "n_head   : " << hparams->n_head << std::endl <<
-                  "n_layer  : " << hparams->n_layer << std::endl <<
-                  "ftype    : " << hparams->ftype << std::endl;
+        if (verbose)
+            std::cerr <<
+                      "n_vocab  : " << hparams->n_vocab << std::endl <<
+                      "n_ctx    : " << hparams->n_ctx << std::endl <<
+                      "n_embd   : " << hparams->n_embd << std::endl <<
+                      "n_head   : " << hparams->n_head << std::endl <<
+                      "n_layer  : " << hparams->n_layer << std::endl <<
+                      "ftype    : " << hparams->ftype << std::endl;
 #endif
 
     }
@@ -160,11 +162,13 @@ bool gpt2_load(gpt2 &model, const std::string &filename) {
         std::string name(buf, length);
 
 #ifdef LLAWA_DEBUG
-        std::cerr << "load tensor: " << name << " -> [";
-        for (int i = 0; i < n_dims; i++) {
-            std::cerr << ne[i] << ", ";
+        if (verbose) {
+            std::cerr << "load tensor: " << name << " -> [";
+            for (int i = 0; i < n_dims; i++) {
+                std::cerr << ne[i] << ", ";
+            }
+            std::cerr << "]" << std::endl;
         }
-        std::cerr << "]" << std::endl;
 #endif
         auto tensor = llawa_new_tensor(&model.context, static_cast<llawa_dtype>(dtype),
                                        n_dims, ne, stride, nullptr);
@@ -312,7 +316,7 @@ llawa_tensor *gpt2_mlp(
         llawa_tensor *proj_bias
 ) {
     llawa_tensor *mlp_dst = llawa_new_tensor2d(&model.context, LLAWA_F32,
-                                           inp->ne[0], mlp_w->ne[1], nullptr);
+                                               inp->ne[0], mlp_w->ne[1], nullptr);
     llawa_mat_mul(&model.context, inp, mlp_w, mlp_dst);
     llawa_new_axis(&model.context, mlp_bias, 0, mlp_bias);
     llawa_add(&model.context, mlp_dst, mlp_bias, mlp_dst);
@@ -379,7 +383,7 @@ int gpt2_forward(
         const std::vector<int> &pos_ids,
         int n_past,
         std::vector<int> *past_cache,
-        std::vector<int> *ret_logits,
+        std::vector<float> *ret_logits,
         std::vector<int> *ret_present_cache
 ) {
     auto wte = model.tensors["wte.weight"];
@@ -414,9 +418,14 @@ int gpt2_forward(
 //        present_cache->push_back(kv_cache);
     }
 //
-//    tokens = gpt2_layer_norm(cur, model.tensors["ln_f.weights"], model.tensors["ln_f.bias"]);
-//    ret_logits = llawa_mat_mul(tokens, llawa_transpose(wte));
+    cur = gpt2_layer_norm(model, cur, model.tensors["ln_f.weight"], model.tensors["ln_f.bias"]);
+    uint32_t pne[4] = {1, 0, 2, 3};
+    llawa_tensor *logits_tensor = llawa_zeros_like(&model.context, cur);
+    llawa_mat_mul(&model.context, cur, llawa_permute(&model.context, wte, pne), logits_tensor);
+    cur = logits_tensor;
 //    ret_present_cache = present_cache;
+    for (int i = 0; i < cur->ne[1]; i++)
+        ret_logits->push_back(llawa_tensor_get_val_f32(&model.context, cur, cur->ne[0] - 1, i, 0, 0));
     return 0;
 }
 
@@ -465,25 +474,76 @@ std::vector<int> gpt_tokenize(const gpt2 &context, const std::string &text) {
     return tokens;
 }
 
+std::string gpt2_sampling(
+        gpt2 &model,
+        std::vector<float> &logits,
+        float temperature,
+        int topk,
+        std::mt19937 &rng
+) {
+    for (float &logit: logits) logit /= temperature;
+    std::vector<std::pair<int, float>> logits_pos;
+    for (int i = 0; i < logits.size(); i++)
+        logits_pos.emplace_back(i, logits[i]);
+    std::sort(
+            logits_pos.begin(),
+            logits_pos.end(),
+            [](const std::pair<int, float> p1, const std::pair<int, float> p2) {
+                return p1.second > p2.second;
+            }
+    );
+    std::vector<std::pair<int, float>> topk_logits;
+    for (int i = 0; i < topk; i++)
+        topk_logits.push_back(logits_pos[i]);
+
+    // softmax
+    {
+        float max1 = -INFINITY;
+        for (auto i: topk_logits) max1 = std::max(max1, i.second);
+        float sum = 0;
+        for (std::pair<int, float> &topk_logit: topk_logits) {
+            topk_logit.second = expf(topk_logit.second - max1);
+            sum += topk_logit.second;
+        }
+        for (std::pair<int, float> &f: topk_logits)
+            f.second /= sum;
+    }
+
+    std::vector<float> probs;
+    for (std::pair<int, float> p: topk_logits) probs.push_back(p.second);
+
+    std::discrete_distribution<> dist(probs.begin(), probs.end());
+    int idx = dist(rng);
+
+    int id = topk_logits[idx].first;
+    return model.id_to_token[id];
+}
+
 int main(int argc, char *argv[]) {
     std::string model_path = "./llawa_gpt2.bin";
-
+    std::mt19937 rng(0);
     gpt2 model;
 
-    gpt2_load(model, model_path);
+    std::string prompt = "This is a story about ";
+    int max_token = 5;
 
-//    gpt2_eval(model);
+    for (int step = 0; step < max_token; step++) {
+        std::cout << prompt << std::endl;
+        gpt2_load(model, model_path, false);
+        auto prompt_tokens = gpt_tokenize(model, prompt);
+        auto pos = std::vector<int>();
+        for (auto i = 0; i < prompt_tokens.size(); i++) pos.push_back(i);
 
-    auto res = gpt_tokenize(model, "hello world! what's your name ?");
-    auto pos = std::vector<int>();
-    for (auto i = 0; i < res.size(); i++) pos.push_back(i);
-
-    std::vector<int> *ret_logits = new std::vector<int>;
-    std::vector<int> *ret_present_cache = new std::vector<int>;
-    gpt2_forward(model, res, pos, 0,
-                 nullptr,
-                 ret_logits,
-                 ret_present_cache);
+        auto *ret_logits = new std::vector<float>;
+        auto *ret_present_cache = new std::vector<int>;
+        gpt2_forward(model, prompt_tokens, pos, 0,
+                     nullptr,
+                     ret_logits,
+                     ret_present_cache);
+        std::string token = gpt2_sampling(model, *ret_logits, 0.8, 5, rng);
+        prompt += (token + " ");
+        llawa_context_destroy(&model.context);
+    }
 
     return 0;
 }
