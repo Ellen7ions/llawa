@@ -543,6 +543,7 @@ int main(int argc, char *argv[]) {
 
         int token = gpt2_sampling(model, *ret_logits, 0.8, 5, rng);
         prompt_tokens.push_back(token);
+        pos.push_back(pos.back() + 1);
         std::cout << model.id_to_token[token];
         llawa_context_destroy(&model.context);
         gpt2_load(model, model_path);
