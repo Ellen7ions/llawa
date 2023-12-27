@@ -188,7 +188,7 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained('/home/lzz/CLionProjects/llawa/pretrained/gpt2')
     pth = torch.load(f"{base_path}/pytorch_model.bin")
 
-    text = "Replace me by any text you'd like."
+    text = "This is a story about "
 
     tinygpt2_pipeline(text, max_token=200)
     # openai_pipeline(text, max_token=200)
