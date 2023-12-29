@@ -10,6 +10,7 @@
 #include <regex>
 #include <cmath>
 #include <random>
+#include "omp.h"
 
 #include "llawa.h"
 
@@ -523,7 +524,7 @@ int main(int argc, char *argv[]) {
     std::mt19937 rng(0);
     gpt2 model;
 
-    std::string prompt = "This is a story about ";
+    std::string prompt = "This is a story about";
     int max_token = 200;
 
     gpt2_load(model, model_path);
@@ -536,15 +537,26 @@ int main(int argc, char *argv[]) {
 
         auto *ret_logits = new std::vector<float>;
         auto *ret_present_cache = new std::vector<int>;
+
+#ifdef OMP_PERF
+        auto t1 = omp_get_wtime();
+#endif
         gpt2_forward(model, prompt_tokens, pos, 0,
                      nullptr,
                      ret_logits,
                      ret_present_cache);
+#ifdef OMP_PERF
+        auto t2 = omp_get_wtime();
+        std::cout << "tokens: " << prompt_tokens.size() << " avg time: " << (t2 - t1) / prompt_tokens.size()
+                  << std::endl;
+#endif
 
         int token = gpt2_sampling(model, *ret_logits, 0.8, 5, rng);
         prompt_tokens.push_back(token);
         pos.push_back(pos.back() + 1);
+#ifndef OMP_PERF
         std::cout << model.id_to_token[token] << std::flush;
+#endif
         llawa_context_destroy(&model.context);
         gpt2_load(model, model_path);
     }
